@@ -1,0 +1,48 @@
+<section class="panel-formulario">
+  
+  <% if (typeof error !== 'undefined' && error) { %>
+    <p class="error" role="alert"><%= error %></p>
+  <% } %>
+
+  <form action="/reservas" method="post" class="formulario">
+
+      
+    <!-- Estudiante -->
+    <label for="estudiante">Estudiante</label>
+    <input type="text" id="estudiante" name="estudiante" value="<%= valores?.estudiante ?? '' %>" required>
+
+    <!-- Email -->
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" value="<%= valores?.email ?? '' %>" required>
+
+   <!-- Sala -->
+<label for="sala">Sala</label>
+<select id="sala" name="sala">
+  <option value="" disabled <%= !valores?.sala ? 'selected' : '' %>>Seleccioná una sala</option>
+  <option value="Sala Norte" <%= valores?.sala === 'Sala Norte' ? 'selected' : '' %>>Sala Norte</option>
+  <option value="Sala Sur" <%= valores?.sala === 'Sala Sur' ? 'selected' : '' %>>Sala Sur</option>
+  <option value="Sala Multimedia" <%= valores?.sala === 'Sala Multimedia' ? 'selected' : '' %>>Sala Multimedia</option>
+</select>
+
+    <!-- Fecha -->
+    <label for="fecha">Fecha</label>
+    <input type="date" id="fecha" name="fecha" value="<%= valores?.fecha ?? '' %>" required>
+
+    <!-- Turno -->
+    <label for="turno">Turno</label>
+    <select id="turno" name="turno" required>
+      <option value="" disabled <%= !valores?.turno ? 'selected' : '' %>>Seleccioná un turno</option>
+      <option value="Mañana" <%= valores?.turno === 'Mañana' ? 'selected' : '' %>>Mañana</option>
+      <option value="Tarde" <%= valores?.turno === 'Tarde' ? 'selected' : '' %>>Tarde</option>
+      <option value="Noche" <%= valores?.turno === 'Noche' ? 'selected' : '' %>>Noche</option>
+    </select>
+
+    <!-- Personas -->
+<div class="form-group">
+  <label for="personas">Cantidad de Personas (1-6):</label>
+  <input type="number" id="personas" name="personas" min="1" max="6" value="<%= valores?.personas ?? '' %>" required>
+</div>
+
+    <button type="submit">Guardar Reserva</button>
+  </form>
+</section>

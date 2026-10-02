@@ -1,124 +1,177 @@
-// Importamos los módulos necesarios para crear un servidor web con Express y trabajar con rutas de archivos
 const express = require("express");
-const path = require("node:path");
-// Importamos las funciones leerJson y escribirJson desde el archivo archivos.js para manejar la lectura y escritura de archivos JSON
-const { leerJson, escribirJson} = require("./archivos");
 const expressLayouts = require("express-ejs-layouts");
-// Definimos el puerto en el que se ejecutará la aplicación y la ruta del archivo JSON que contiene los datos de las mascotas
+ // Base de datos en memoria y constantes de dominio
+const salasPermitidas = ["Sala Norte", "Sala Sur", "Sala Multimedia"];
+const turnosPermitidos = ["Mañana", "Tarde", "Noche"];
+const morgan = require("morgan");
+const path = require("node:path");
+const { leerJson } = require("./archivos");
 const PORT = 3000;
-const rutaDatos = path.join(__dirname, "..", "datos", "mascotas.json");
-// Función principal que inicializa la aplicación
+const rutaDatos = path.join(__dirname, "..", "datos", "reservas.json");
+let numeroDeSolicitud = 0;
+
+function identificarSolicitud(req, res, next) {
+  numeroDeSolicitud += 1;
+  res.locals.solicitudId = `SOL-${String(numeroDeSolicitud).padStart(4, "0")}`;
+  next();
+}
+function medirDuracion(req, res, next) {
+  const inicio = process.hrtime.bigint();
+  res.on("finish", () => {
+    const fin = process.hrtime.bigint();
+    const milisegundos = Number(fin - inicio) / 1_000_000;
+    console.log(
+      `[${res.locals.solicitudId}] ${req.method} ${req.originalUrl} ` +
+        `${res.statusCode} ${milisegundos.toFixed(2)} ms`,
+    );
+  });
+  next();
+}
+
+function prepararAreaReservas(req, res, next) {
+  res.locals.seccion = "Reservas Alojamiento";
+  next();
+}
+
+function validarReservas(req, res, next) {
+ 
+  const estudiante = String(req.body.estudiante ?? "").trim();
+  const email = String(req.body.email ?? "").trim();
+  const sala = String(req.body.sala ?? "").trim();
+  const fecha = String(req.body.fecha ?? "").trim();
+  const turno = String(req.body.turno ?? "").trim();
+  const personas = Number(req.body.personas ?? 0);
+  
+   // 1. Comprobar campos obligatorios y que personas sea un entero entre 1 y 6
+  if (
+    !estudiante ||
+    !email ||
+    !sala ||
+    !fecha ||
+    !turno ||
+    !Number.isInteger(personas) ||
+    personas < 1 ||
+    personas > 6
+  ) {
+    return res.status(400).render("reservas/nueva", {
+      titulo: "Nueva Reserva",
+      error: "Completá todos los campos con valores válidos (personas debe ser de 1 a 6).",
+      valores: req.body,
+    });
+  }
+  // Comprobar email con @
+  if (!email.includes("@")) {
+    return res.status(400).render("reservas/nueva", {
+      titulo: "Nueva Reserva",
+      error: "El correo debe incluir un '@'.",
+      valores: req.body,
+      salasPermitidas,
+      turnosPermitidos
+    });
+  }
+
+  // Comprobar sala y turno
+  if (!salasPermitidas.includes(sala) || !turnosPermitidos.includes(turno)) {
+    return res.status(400).render("reservas/nueva", {
+      titulo: "Nueva Reserva",
+      error: "La sala o el turno no son válidos.",
+      valores: req.body,
+      salasPermitidas,
+      turnosPermitidos
+    });
+  }
+
+  req.reservaValidada = { 
+    
+    estudiante, 
+    email, 
+    sala, 
+    fecha, 
+    turno, 
+    personas 
+  };
+
+  next();
+}
+
 async function main() {
-  const mascotas = await leerJson(rutaDatos);
+  const reservas = await leerJson(rutaDatos);
   const app = express();
-// Configuramos la aplicación para usar EJS como motor de plantillas y establecer la carpeta de vistas y el layout principal
+
+  function crearReservas(req, res) {
+    const ultimoId = reservas.reduce(
+      (mayorId, reservas) => Math.max(mayorId, reservas.id),
+      0,
+    );
+    reservas.push({ id: ultimoId + 1, ...req.reservaValidada });
+    res.redirect("/reservas?creado=true");
+   
+  }
+
   app.set("view engine", "ejs");
   app.set("views", path.join(__dirname, "..", "views"));
-  app.use(expressLayouts);
   app.set("layout", "layouts/main");
+  app.use(morgan("dev"));
+  app.use(identificarSolicitud);
+  app.use(medirDuracion);
+  app.use(expressLayouts);
   app.use(express.static(path.join(__dirname, "..", "public")));
-
-  // incorporo esta linea para poder recibir datos de formularios en formato x-www-form-urlencoded//
   app.use(express.urlencoded({ extended: false }));
-  // Definimos las rutas de la aplicación para manejar las solicitudes HTTP y renderizar las vistas correspondientes
-  app.get("/api/mascotas", (req, res) => {
-    res.json(mascotas);
-  });
-// Definimos la ruta raíz que renderiza la vista de inicio con el título y la lista de mascotas
+  app.use(express.json());
+
   app.get("/", (req, res) => {
-    res.render("inicio", { titulo: "Mercado de Mascotas", mascotas: mascotas });
+    res.render("inicio", { titulo: "Sistema de Reservas" });
   });
-// Definimos la ruta para mostrar la lista de mascotas, la ruta para crear una nueva mascota y la ruta para mostrar los detalles de una mascota específica según su ID
-  app.get("/mascotas", (req, res) => {
-    res.render("mascotas/lista", {
-      titulo: "Mascotas",
-      mascotas: mascotas,
+  app.get("/api/reservas", (req, res) => {
+    res.json(reservas);
+  });
+
+  const reservasRouter = express.Router();
+  reservasRouter.use(prepararAreaReservas);
+  reservasRouter.get("/", (req, res) => {
+    res.render("reservas/lista", {
+      titulo: "Reservas Registradas",
+      reservas,
     });
   });
-
-  app.get("/mascotas/nueva", (req, res) => {
-    res.render("mascotas/nueva", {
-      titulo: "Nueva mascota",
+  reservasRouter.get("/nueva", (req, res) => {
+    res.render("reservas/nueva", {
+      titulo: "Nueva Reserva",
       error: null,
       valores: {},
     });
   });
-// Definimos la ruta para mostrar los detalles de una mascota específica según su ID, y si no se encuentra, renderizamos una vista de error con un mensaje adecuado
-  app.get("/mascotas/:id", (req, res) => {
-    const id = Number(req.params.id);
 
-    const mascota = mascotas.find((mascota) => mascota.id === id);
-    if (!mascota) {
+  reservasRouter.get("/:id", (req, res) => {
+    const id = Number(req.params.id);
+    const reserva = reservas.find((elemento) => elemento.id === id);
+
+    if (!reserva) {
       return res.status(404).render("no-encontrado", {
-        titulo: "Mascota no encontrada",
-        mensaje: "No existe una mascota con ese identificador.",
+        titulo: "Reserva no encontrado",
+        mensaje: "No existe una reserva con ese identificador.",
       });
     }
-    // Si se encuentra la mascota, renderizamos la vista de detalle con la información correspondiente
-    res.render("mascotas/detalle", {
-      titulo: mascota.nombre,
-      mascota,
+
+    res.render("reservas/detalle", {
+      titulo: reserva.id,
+      reserva, 
     });
   });
-  // Definimos la ruta para manejar la creación de una nueva mascota mediante una solicitud POST, validando los datos recibidos y guardándolos en el archivo JSON y en el arreglo de mascotas
-  // ruta para crear una nueva mascota
-app.post("/mascotas", (req, res) => {
-  const { nombre, especie, precio, edad, descripcion, imagen } = req.body;
 
-  const nombreLimpio = String(nombre ?? "").trim();
-  const especieLimpia = String(especie ?? "").trim();
-  const precioLimpio = Number(precio ?? 0);
-  const edadLimpia = String(edad ?? "").trim();
-  const descripcionLimpia = String(descripcion ?? "").trim();
-  
-  // Si no viene imagen, se asigna una por defecto o string vacío
-  const imagenLimpia = String(imagen ?? "marca.svg").trim();
-
-  // ¿ que se realizo para que funcione el código? se Quito !imagenLimpia del chequeo de obligatorios
-  if (!nombreLimpio || !especieLimpia || !precioLimpio || !edadLimpia || !descripcionLimpia) {
-    return res.status(400).render("mascotas/nueva", {
-      titulo: "Nueva mascota",
-      error: "Completá todos los campos con valores válidos.",
-      valores: req.body,
+  reservasRouter.post("/", validarReservas, crearReservas);
+  app.use("/reservas", reservasRouter);
+  app.use((req, res) => {
+    res.status(404).render("no-encontrado", {
+      titulo: "Página no encontrada",
+      mensaje: "La dirección solicitada no existe.",
     });
-  }
-// Calculamos el último ID de las mascotas existentes para asignar un nuevo ID a la mascota que se va a crear
-  const ultimoId = mascotas.reduce(
-    (mayorId, mascota) => Math.max(mayorId, mascota.id),
-    0
-  );
-
-  // aqui complete el resto del código para guardar la mascota
-
-  // comentario de recuerdo: se Guardo la nueva mascota en el arreglo y se  escribimos en el archivo JSON
-  escribirJson(rutaDatos, [...mascotas, {
-    id: ultimoId + 1,
-    nombre: nombreLimpio,
-    especie: especieLimpia,
-    precio: precioLimpio, 
-    edad: edadLimpia,
-    descripcion: descripcionLimpia,
-    imagen: imagenLimpia, 
-      
-   }]);
-//que hace pusch? push agrega un nuevo elemento al final del arreglo. En este caso, se está agregando un objeto que representa una nueva mascota con sus propiedades (id, nombre, especie, precio, edad, descripcion e imagen) al arreglo de mascotas existente. Esto permite que la nueva mascota se incluya en la lista de mascotas y se pueda acceder a ella posteriormente.
-    mascotas.push({
-      id: ultimoId + 1,
-      nombre: nombreLimpio,
-      especie: especieLimpia,
-      precio: precioLimpio,
-      edad: edadLimpia,
-      descripcion: descripcionLimpia,
-      imagen: imagenLimpia,
-    });
-
-    // Redirigimos al usuario a la lista de mascotas después de guardar la nueva mascota
-    res.redirect("/mascotas");
   });
-
   app.listen(PORT, () => {
     console.log(`Aplicación disponible en http://localhost:${PORT}`);
   });
 }
-// llamo a la función main para iniciar la aplicación
-main();
+main().catch((error) => {
+  console.error("No se pudo iniciar la aplicación:", error);
+  process.exitCode = 1;
+});
